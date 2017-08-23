@@ -135,7 +135,6 @@ class NN(object):
         dWW[-1] = (np.dot(dZZ[-1], AA[-2].T) + R) / self.m
         dBB[-1] = np.sum(dZZ[-1], axis=1, keepdims=True) / self.m
         for l in range(self.num_layers-2,0,-1):
-
             dAA[l] = np.dot(self.WW[l+1].T, dZZ[l+1])  
             dZZ[l] = dAA[l]*self.drelu(ZZ[l])
             R = self.l*self.WW[l]
@@ -200,15 +199,16 @@ class NN(object):
                 self.WW[l] -= self.alpha*self.VdWW[l]
                 self.BB[l] -= self.alpha*self.VdBB[l]
 
-    def backprop_minibatch_rmsprop(self, iterations=1, batch_size=256, b2=0.9):   
+    def backprop_minibatch_rmsprop(self, iterations=1, batch_size=256, b2=0.999):   
         epsilon = 1e-8
+        nb2 = 1 - b2     
         for i in range(iterations):
             dWW, dBB = self.grad_minibatch(batch_size)
             for l in range(1,self.num_layers):
-                self.SdWW[l] = b2*self.SdWW[l] + np.square(dWW[l])
-                self.SdBB[l] = b2*self.SdBB[l] + np.square(dBB[l])
-                self.WW[l] -= self.alpha*(dWW[l] / np.sqrt(self.SdWW[l] + epsilon))
-                self.BB[l] -= self.alpha*(dBB[l] / np.sqrt(self.SdBB[l] + epsilon))
+                self.SdWW[l] = b2*self.SdWW[l] + nb2*np.square(dWW[l])
+                self.SdBB[l] = b2*self.SdBB[l] + nb2*np.square(dBB[l])
+                self.WW[l] -= self.alpha*np.divide(dWW[l], np.sqrt(self.SdWW[l] + epsilon))
+                self.BB[l] -= self.alpha*np.divide(dBB[l], np.sqrt(self.SdBB[l] + epsilon))
 
     def num_grad(self):
         pass

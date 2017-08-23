@@ -84,12 +84,12 @@ if __name__ == '__main__':
             accuracy, precision, recall, f1 = stats(*model.accuracy(model.X, model.Y))
             cvcost = model.J(model.WW, model.BB, X = Xval, Y = Yval)
             cvaccuracy, cvprecision, cvrecall, cvf1 = stats(*model.accuracy(Xval, Yval))
-            model.backprop_minibatch_rmsprop(iterations=iterations, batch_size=256, b2=0.9)
+            model.backprop_minibatch_momentum(iterations=iterations, batch_size=256, b=0.9)
             t = now() - start
             print(f'[{(i+1)*iterations}] 100 itterations took {t:.3f}s\r', end='')
             sys.stdout.flush()
 
-        print(f'For a = {a}')
+        print(f'\nFor a = {a}')
         print(f'[{(i+1)*iterations:07}] Train: Cost {cost:.7f},  Ac {accuracy:.4f}, Pr {precision:.4f}, Re {recall:.4f}, F1 {f1:.4f};'
                   f'     CVal: Cost {cvcost:.7f}, Ac {cvaccuracy:.4f}, Pr {cvprecision:.4f}, Re {cvrecall:.4f}, F1 {cvf1:.4f}')
         s = { 'cost':cost,
