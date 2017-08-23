@@ -182,7 +182,7 @@ class NN(object):
                 self.WW[l] -= self.alpha*dWW[l]
                 self.BB[l] -= self.alpha*dBB[l]
 
-    def backprop_minibatch_momentum(self, iterations=1, batch_size=256): 
+    def backprop_minibatch(self, iterations=1, batch_size=256): 
         for i in range(iterations):
             dWW, dBB = self.grad_minibatch(batch_size)
             for l in range(1,self.num_layers):
@@ -199,7 +199,7 @@ class NN(object):
                 self.WW[l] -= self.alpha*self.VdWW[l]
                 self.BB[l] -= self.alpha*self.VdBB[l]
 
-    def backprop_minibatch_rmsprop(self, iterations=1, batch_size=256, b2=0.999):   
+    def backprop_minibatch_rmsprop(self, iterations=1, batch_size=256, b2=0.9):   
         epsilon = 1e-8
         nb2 = 1 - b2     
         for i in range(iterations):

@@ -68,8 +68,7 @@ if __name__ == '__main__':
 
 
     np.random.seed(122)
-    alph = [16, 8, 4, 2, 1, 0.64, 0.32, 0.16, 0.08, 0.06, 0.04, 0.03, 0.02]
-    alph = alph[::-1]
+    alph = [0.3, 0.6, 1, 3, 9]
     stats_r = []
     from time import time as now
     for a in alph:
@@ -78,13 +77,13 @@ if __name__ == '__main__':
         print('backprop started')
         iterations = 100        
         # accuracy, precision, recall, f1 = stats(*model.accuracy(model.X, model.Y))
-        for i in range(20):
+        for i in range(10):
             start = now()
             cost = model.J(model.WW, model.BB)
             accuracy, precision, recall, f1 = stats(*model.accuracy(model.X, model.Y))
             cvcost = model.J(model.WW, model.BB, X = Xval, Y = Yval)
             cvaccuracy, cvprecision, cvrecall, cvf1 = stats(*model.accuracy(Xval, Yval))
-            model.backprop_minibatch_momentum(iterations=iterations, batch_size=256, b=0.9)
+            model.backprop_minibatch_rmsprop(iterations=iterations, batch_size=256, b2=0.999)
             t = now() - start
             print(f'[{(i+1)*iterations}] 100 itterations took {t:.3f}s\r', end='')
             sys.stdout.flush()
