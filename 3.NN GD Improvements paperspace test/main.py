@@ -36,6 +36,15 @@ def stats(tp, tn, fp, fn):
     f1 = (2*precision*recall) / (precision+recall)
     return accuracy, precision, recall, f1
 
+def add_line_err_func(val, step, last_point):
+    p1 = last_point
+    p2 = (last_point[0]+step, val)
+    plt.plot( (p1[0],p2[0]), (p1[1],p2[1]), color='red')
+    if last_point is None:
+        last_point = (0,val)
+    return p2
+
+
 if __name__ == '__main__':
     np.set_printoptions(threshold=np.nan)
     datapoints = [] 
@@ -70,120 +79,38 @@ if __name__ == '__main__':
 
     
     from time import time as now
-    from  itertools import product as listproduct
-    alph = [0.15, 0.3, 0.53, 0.76, 1, 1.22]
-    lmbd = [10, 14, 17, 20, 23, 26]
-    searchspace = listproduct(lmbd, alph)
 
-    stats_r = []
+    graph_last_point = None
+    plt.ion()
 
-    for l,a in searchspace:
-        np.random.seed(122)
-        model = NN(X,Y, alpha=a, l=l, layers_list=[3072, 256, 128, 128, 64, 64, 64, 64, 1])
-        # model.backprop_numcheck(iterations=1000)
-        print('backprop started')
-        iterations = 400
+    np.random.seed(122)
+    model = NN(X,Y, alpha=0.76, l=20, layers_list=[3072, 256, 128, 128, 64, 64, 64, 64, 1])
+    # model.backprop_numcheck(iterations=1000)
+    print('backprop started')
+    iterations = 500
+    # accuracy, precision, recall, f1 = stats(*model.accuracy(model.X, model.Y))
+    for i in range(600):
+        start = now()
+        # cost = model.J(model.WW, model.BB)
         # accuracy, precision, recall, f1 = stats(*model.accuracy(model.X, model.Y))
-        for i in range(10):
-            start = now()
-            # cost = model.J(model.WW, model.BB)
-            # accuracy, precision, recall, f1 = stats(*model.accuracy(model.X, model.Y))
-            # cvcost = model.J(model.WW, model.BB, X = Xval, Y = Yval)
-            # cvaccuracy, cvprecision, cvrecall, cvf1 = stats(*model.accuracy(Xval, Yval))
-            model.backprop_minibatch_momentum(iterations=iterations, batch_size=256, b=0.9)
-            t = now() - start
-            print('[{iter}] {iterations} itterations took {t:.3f}s\r'.format(iter=(i+1)*iterations, iterations=iterations, t=t), end='')
-            sys.stdout.flush()
+        # cvcost = model.J(model.WW, model.BB, X = Xval, Y = Yval)
+        # cvaccuracy, cvprecision, cvrecall, cvf1 = stats(*model.accuracy(Xval, Yval))
+        model.backprop_minibatch_momentum(iterations=iterations, batch_size=256, b=0.9)
+        t = now() - start
+        print('[{t:.3f}s]'.format(iter=(i+1)*iterations, iterations=iterations, t=t), end='')
+        sys.stdout.flush()
 
-        #averaging over 5 last iterations     
-        # 1
         cost = model.J(model.WW, model.BB)
         cvcost = model.J(model.WW, model.BB, X = Xval, Y = Yval)
         cvaccuracy, cvprecision, cvrecall, cvf1 = stats(*model.accuracy(Xval, Yval))
-
-        # 2
-        model.backprop_minibatch_momentum(iterations=1, batch_size=256, b=0.9)
-        cost += model.J(model.WW, model.BB)
-        cvcost += model.J(model.WW, model.BB, X = Xval, Y = Yval)
-        ncvaccuracy, ncvprecision, ncvrecall, ncvf1 = stats(*model.accuracy(Xval, Yval))
-
-        cvaccuracy += ncvaccuracy
-        cvprecision += ncvprecision
-        cvrecall += ncvrecall
-        cvf1 += ncvf1
-
-        # 3
-        model.backprop_minibatch_momentum(iterations=1, batch_size=256, b=0.9)
-        cost += model.J(model.WW, model.BB)
-        cvcost += model.J(model.WW, model.BB, X = Xval, Y = Yval)
-        ncvaccuracy, ncvprecision, ncvrecall, ncvf1 = stats(*model.accuracy(Xval, Yval))
-
-        cvaccuracy += ncvaccuracy
-        cvprecision += ncvprecision
-        cvrecall += ncvrecall
-        cvf1 += ncvf1
-
-        # 4
-        model.backprop_minibatch_momentum(iterations=1, batch_size=256, b=0.9)
-        cost += model.J(model.WW, model.BB)
-        cvcost += model.J(model.WW, model.BB, X = Xval, Y = Yval)
-        ncvaccuracy, ncvprecision, ncvrecall, ncvf1 = stats(*model.accuracy(Xval, Yval))
-
-        cvaccuracy += ncvaccuracy
-        cvprecision += ncvprecision
-        cvrecall += ncvrecall
-        cvf1 += ncvf1
-
-        # 5
-        model.backprop_minibatch_momentum(iterations=1, batch_size=256, b=0.9)
-        cost += model.J(model.WW, model.BB)
-        cvcost += model.J(model.WW, model.BB, X = Xval, Y = Yval)
-        ncvaccuracy, ncvprecision, ncvrecall, ncvf1 = stats(*model.accuracy(Xval, Yval))
-
-        cvaccuracy += ncvaccuracy
-        cvprecision += ncvprecision
-        cvrecall += ncvrecall
-        cvf1 += ncvf1
-
-        cost /= 5
-        cvcost /= 5
-        cvaccuracy /= 5
-        cvprecision /= 5
-        cvrecall /= 5
-        cvf1  /= 5
-        #avereging completed
-
-        print('\n[{iter:07}]  a = {a:>5}, l = {l:>3}, Train Cost: {cost:.7f}, CVal Accuracy: {cvaccuracy:.4f}, F1 {cvf1:.4f}, Cost: {cvcost:.7f}'.format(iter=(i+1)*iterations, iterations=iterations, a=a, l=l, cost=cost, cvaccuracy=cvaccuracy, cvf1=cvf1, cvcost=cvcost))
         cverr = 1 - cvaccuracy
-        #print(f'[{(i+1)*iterations:07}] Train: Cost {cost:.7f},  Ac {accuracy:.4f}, Pr {precision:.4f}, Re {recall:.4f}, F1 {f1:.4f};'
-        #          f'     CVal: Cost {cvcost:.7f}, Ac {cvaccuracy:.4f}, Pr {cvprecision:.4f}, Re {cvrecall:.4f}, F1 {cvf1:.4f}')
-        s = { 'cost':cost,
-              # 'accuracy':accuracy,
-              # 'precision,':precision, 
-              # 'recall':recall,
-              # 'f1,':f1, 
-              'cvcost':cvcost,
-              'cvaccuracy':cvaccuracy,
-              'cverr': cverr,
-              'cvprecision':cvprecision,
-              'cvrecall':cvrecall,
-              'cvf1':cvf1,
-              'a':a,
-              'l':l
-              }
-        stats_r.append(s)
+        
+        print('\n[{iter:07}]  a = {a:>5}, l = {l:>3}, Train Cost: {cost:.7f}, CVal Error: {cverr:.4f}, F1 {cvf1:.4f}, Cost: {cvcost:.7f}'.format(iter=(i+1)*iterations, iterations=iterations, a=a, l=l, cost=cost, cverr=cverr, cvf1=cvf1, cvcost=cvcost))
+        graph_last_point = add_line_err_func(cverr, iterations, graph_last_point)
 
-    print('Best 5:')
-    kf = lambda x: x['cverr']
-    best5 = sorted(stats_r, key=kf)
-    for i in best5[:5]:
-        a,l,cost,cvaccuracy,cvf1,cvcost = i['a'],i['l'],i['cost'],i['cvaccuracy'],i['cvf1'],i['cvcost']
-        print('a = {a:>5}, l = {l:>3}, Train Cost: {cost:.7f}, CVal Accuracy: {cvaccuracy:.4f}, F1 {cvf1:.4f}, Cost: {cvcost:.7f}'.format(a=a, l=l, cost=cost, cvaccuracy=cvaccuracy, cvf1=cvf1, cvcost=cvcost))
-    costs = [stat['cost'] for stat in stats_r]
-    cverrs = [stat['cverr'] for stat in stats_r]
-    plt.plot(costs, color='r')
-    plt.plot(cverrs, color='b')
-    plt.show()
+    #print(f'[{(i+1)*iterations:07}] Train: Cost {cost:.7f},  Ac {accuracy:.4f}, Pr {precision:.4f}, Re {recall:.4f}, F1 {f1:.4f};'
+    #          f'     CVal: Cost {cvcost:.7f}, Ac {cvaccuracy:.4f}, Pr {cvprecision:.4f}, Re {cvrecall:.4f}, F1 {cvf1:.4f}')
+
 
     # print(model.WW, end = '\n\n\n\n\n')
     # print(model.BB)
