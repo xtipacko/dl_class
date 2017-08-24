@@ -82,7 +82,7 @@ if __name__ == '__main__':
         model = NN(X,Y, alpha=a, l=l, layers_list=[3072, 256, 128, 128, 64, 64, 64, 64, 1])
         # model.backprop_numcheck(iterations=1000)
         print('backprop started')
-        iterations = 500
+        iterations = 400
         # accuracy, precision, recall, f1 = stats(*model.accuracy(model.X, model.Y))
         for i in range(10):
             start = now()
