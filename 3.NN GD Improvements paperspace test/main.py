@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from data import batch_1, batch_2, batch_3, batch_4
 from data import batch_5, test_batch, batch_meta
 from pprint import pprint
