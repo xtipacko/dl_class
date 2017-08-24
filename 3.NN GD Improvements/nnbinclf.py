@@ -14,6 +14,9 @@ class NN(object):
         self.SdWW = [None] + [np.zeros(W_dims) for W_dims in self.W_dims]
         self.SdBB = [None] + [np.zeros((W_dims[0],1)) for W_dims in self.W_dims]
 
+        self.adagradcacheWW = [None] + [np.zeros(W_dims) for W_dims in self.W_dims]
+        self.adagradcacheBB = [None] + [np.zeros((W_dims[0],1)) for W_dims in self.W_dims]
+
         self.X_unnorm = X
         self.X, self.X_mean, self.X_std = self.normalize(self.X_unnorm, gen_stats=True)
         self.Y = Y
@@ -199,16 +202,47 @@ class NN(object):
                 self.WW[l] -= self.alpha*self.VdWW[l]
                 self.BB[l] -= self.alpha*self.VdBB[l]
 
-    def backprop_minibatch_rmsprop(self, iterations=1, batch_size=256, b2=0.9):   
-        epsilon = 1e-8
-        nb2 = 1 - b2     
+
+    def backprop_minibatch_adagrad(self, iterations=1, batch_size=256):   
+        epsilon = 1e-7
         for i in range(iterations):
             dWW, dBB = self.grad_minibatch(batch_size)
             for l in range(1,self.num_layers):
-                self.SdWW[l] = b2*self.SdWW[l] + nb2*np.square(dWW[l])
-                self.SdBB[l] = b2*self.SdBB[l] + nb2*np.square(dBB[l])
-                self.WW[l] -= self.alpha*np.divide(dWW[l], np.sqrt(self.SdWW[l] + epsilon))
-                self.BB[l] -= self.alpha*np.divide(dBB[l], np.sqrt(self.SdBB[l] + epsilon))
+                self.adagradcacheWW[l] += dWW[l]**2
+                self.adagradcacheBB[l] += dBB[l]**2
+                self.WW[l] -= self.alpha * dWW[l] / (np.sqrt(self.adagradcacheWW[l])  + epsilon)
+                self.BB[l] -= self.alpha * dBB[l] / (np.sqrt(self.adagradcacheBB[l])  + epsilon)
+
+
+    def backprop_minibatch_rmsprop(self, iterations=1, batch_size=256, decay_rate=0.99):   
+        epsilon = 1e-8
+        un_decay_rate = 1 - b2     
+        for i in range(iterations):
+            dWW, dBB = self.grad_minibatch(batch_size)
+            for l in range(1,self.num_layers):
+                self.SdWW[l] = decay_rate * self.SdWW[l] + un_decay_rate * dWW[l]**2
+                self.SdBB[l] = decay_rate * self.SdBB[l] + un_decay_rate * dBB[l]**2
+                self.WW[l] -= self.alpha * dWW[l] / (np.sqrt(self.SdWW[l]) + epsilon)
+                self.BB[l] -= self.alpha * dBB[l] / (np.sqrt(self.SdBB[l]) + epsilon)
+
+
+    def backprop_minibatch_adam(self, iterations=1, realiter = 0, batch_size=256, b1=0.9, b2=0.999): 
+        nb1 = 1 - b1  
+        nb2 = 1 - b2
+        epsilon = 1e-7
+        for i in range(iterations):
+            t = i + realiter
+            b1_bias_correction = nb1**t
+            b2_bias_correction = nb2**t
+            dWW, dBB = self.grad_minibatch(batch_size)
+            for l in range(1,self.num_layers):
+                self.VdWW[l] = (b1 * self.VdWW[l] + nb1 * dWW[l])    / b1_bias_correction
+                self.VdBB[l] = (b1 * self.VdBB[l] + nb1 * dBB[l])    / b1_bias_correction
+                self.SdWW[l] = (b2 * self.SdWW[l] + nb2 * dWW[l]**2) / b2_bias_correction
+                self.SdBB[l] = (b2 * self.SdBB[l] + nb2 * dBB[l]**2) / b2_bias_correction
+                self.WW[l] -= self.alpha * self.VdWW[l] / (np.sqrt(self.SdWW[l]) + epsilon)
+                self.BB[l] -= self.alpha * self.VdBB[l] / (np.sqrt(self.SdBB[l]) + epsilon)
+
 
     def num_grad(self):
         pass
