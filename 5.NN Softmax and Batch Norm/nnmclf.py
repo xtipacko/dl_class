@@ -12,10 +12,10 @@ def LCM(a, b):
 
 
 class Multiclass_NN(object):
-    def __init__(self, X, Y, learning_rate=1, 
-                 X_dev=None, Y_dev=None, 
-                 layers_list=[3072, 256, 128, 10], 
-                 keep_prob=[1.0,1.0,1.0,1.0], 
+    def __init__(self, X, Y, learning_rate=1,
+                 X_dev=None, Y_dev=None,
+                 layers_list=[3072, 256, 128, 10],
+                 keep_prob=[1.0,1.0,1.0,1.0],
                  optimizer='momentum', minibatch_size = 16 ):
         assert isinstance(keep_prob, list), 'keep_probe is a list of probabilities of keeping neurons during dropout in each layer'
         assert len(keep_prob) == len(layers_list), 'keep_prob should have the same length as layers_list'
@@ -26,7 +26,7 @@ class Multiclass_NN(object):
         self.optimizer = optimizer
         self.layers_list = layers_list
         self.KP = keep_prob
-        self.L = len(layers_list)  
+        self.L = len(layers_list)
 
         self.D = [None]*self.L # dropout masks
 
@@ -34,16 +34,18 @@ class Multiclass_NN(object):
 
         self.W_dims, self.B_dims = self.calc_dims(self.layers_list, self.L)
         self.W, self.B = self.He_init_weights(self.W_dims, self.B_dims)
-   
+        self.A = [None]*self.L
+        self.Z = [None]*self.L
+
         self.VdW, self.VdB = self.init_optimizer(self.W_dims, self.B_dims, optimizer=self.optimizer)
 
         self.Xraw = X
-        self.Yraw = Y               
+        self.Yraw = Y
 
         self.X, self.X_mean, self.X_std = self.normalize(self.Xraw, gen_stats=True)
-        self.Y = self.one_hot_encoding(self.Yraw, self.K)        
+        self.Y = self.one_hot_encoding(self.Yraw, self.K)
         self.minibatch_size = minibatch_size
-        
+
         # shuffle data
         self.X, self.Y = self.shuffle(self.X, self.Y)
         # Add (make if it doesn't exist) dev set
@@ -51,12 +53,12 @@ class Multiclass_NN(object):
             self.X_dev = self.X[:, -10000:]
             self.Y_dev = self.Y[:, -10000:]
             self.X = self.X[:, :-10000]
-            self.Y = self.Y[:, :-10000]            
+            self.Y = self.Y[:, :-10000]
         else:
             self.X_dev = X_dev
-            self.Y_dev = Y_dev    
-        self.Y_dev = self.one_hot_encoding(self.Y_dev, self.K)   
-        self.m_dev = self.X_dev.shape[1]   
+            self.Y_dev = Y_dev
+        self.Y_dev = self.one_hot_encoding(self.Y_dev, self.K)
+        self.m_dev = self.X_dev.shape[1]
         # least comon multiplier between m and mini-batch size
         m = self.X.shape[1]
         # m_lcm = LCM(m, self.minibatch_size)
@@ -81,11 +83,11 @@ class Multiclass_NN(object):
         else:
             self.Xbatches = np.array_split(self.X, self.batches_num, axis=1)
             self.Ybatches = np.array_split(self.Y, self.batches_num, axis=1)
-        
+
 
     def shuffle(self, X, Y):
         p = np.random.permutation(Y.shape[1])
-        X_shuffled, Y_shuffled = X[:,p], Y[:,p] 
+        X_shuffled, Y_shuffled = X[:,p], Y[:,p]
         # Y = np.array(Y, dtype=np.int)
         return X_shuffled, Y_shuffled
 
@@ -119,7 +121,7 @@ class Multiclass_NN(object):
         else:
             X_mean = self.X_mean
             X_std = self.X_std
-        
+
         X_norm = (X_unnorm - X_mean) / X_std
 
         return X_norm, X_mean, X_std
@@ -130,7 +132,7 @@ class Multiclass_NN(object):
         Y = (H == Yraw).astype(np.int32)
         return Y
 
-    
+
     def sigmoid(self, Z):
         return np.reciprocal(1 + np.exp(-Z))
 
@@ -159,24 +161,32 @@ class Multiclass_NN(object):
 
 
     def desoftmax(self, dA):
-        pass  
+        pass
 
 
-    def new_dropout_mask(self, KP):        
+    def new_dropout_mask(self, KP):
         for l in range(1,self.L):
             mask = (np.random.rand(self.layers_list[l],1) < KP[l]).astype(np.int32)
             self.D[l] = mask
 
 
 
-    def forward(self, X, W, B, dropout=True):
+    def forward(self, X, W = None, B = None, dropout=False):
+        if W is None or B is None:
+            W = self.W
+            B = self.B
         if dropout:
             self.new_dropout_mask(self.KP)
         else:
             self.new_dropout_mask([1.0]*self.L)
-        
-        print(self.D)
-        
+
+        self.A[0] = X
+        for l in range(1, self.L-1):
+            self.Z[l] = self.W[l] @ self.A[l-1] + self.B[l]
+            self.A[l] = self.relu(self.Z[L]) * self.D[l] / self.KP[l]
+        self.Z[-1] = self.W[-1] @ self.A[-2] + self.B[-1]
+        self.A[-1] = self.softmax(self.Z) * self.D[l] / self.KP[l]
+
 
     def predict(self, ):
         pass
@@ -232,7 +242,7 @@ if __name__ == '__main__':
     X, Y = convert_for_nn(train_batches)
     X, Y = data_augmentation(X, Y, flip=True, brighter=False, darker=False)
     Xtest, Ytest = convert_for_nn(test_batches)
-    
+
     x = Multiclass_NN(X,Y, X_dev = Xtest, Y_dev = Ytest, learning_rate=2, keep_prob=[1.0,0.85,0.85,1.0], layers_list=[3072,128,32,10], minibatch_size=256)
     print(f'DONE!\n')
     print(f'x.learning_rate: {x.learning_rate}')
@@ -275,6 +285,6 @@ if __name__ == '__main__':
 
     print(f'x.Xbatches (only len): {len(x.Xbatches)}')
     print(f'x.Ybatches (only len): {len(x.Ybatches)}')
-    
+
 
     x.forward(0,0,0)
