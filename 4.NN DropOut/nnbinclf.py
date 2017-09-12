@@ -1,14 +1,13 @@
-#!/usr/bin/env python3
 import numpy as np
 
 class NN(object):
-    def __init__(self, X, Y, alpha=1, l=0.01, layers_list=[2, 3, 1]):
+    def __init__(self, X, Y, alpha=1, keep_prob=None, layers_list=[2, 3, 1]):
         self.layers_list = layers_list
         self.num_layers = len(layers_list)
         self.W_dims = self.__calc_dims(self.layers_list)
         # print(self.W_dims)
         self.WW, self.BB = self.__init_weights(self.W_dims) #list of weights and biases for each layer
-        
+
         self.VdWW = [None] + [np.zeros(W_dims) for W_dims in self.W_dims]
         self.VdBB = [None] + [np.zeros((W_dims[0],1)) for W_dims in self.W_dims]
 
@@ -17,13 +16,21 @@ class NN(object):
 
         self.adagradcacheWW = [None] + [np.zeros(W_dims) for W_dims in self.W_dims]
         self.adagradcacheBB = [None] + [np.zeros((W_dims[0],1)) for W_dims in self.W_dims]
-
+        
         self.X_unnorm = X
         self.X, self.X_mean, self.X_std = self.normalize(self.X_unnorm, gen_stats=True)
         self.Y = Y
         self.m = X.shape[1]
         self.alpha = alpha
-        self.l = l # lambda
+
+        if keep_prob:
+            assert isinstance(keep_prob, list), 'keep_probe is a list of probabilities of keeping neurons during dropout in each layer'
+            assert len(keep_prob) == self.num_layers, 'keep_prob list should have the same number of layers as the model itself'      
+            assert keep_prob[-1] == 1, 'we don\'t drop from output layer'
+            keep_prob = [ float(i) for i in keep_prob]
+            self.keep_prob = keep_prob # lambda
+        else:
+            self.keep_prob = [1.0]*self.num_layers
 
 
     def __calc_dims(self, layers_list):
@@ -40,7 +47,7 @@ class NN(object):
         BB = [None] # W0, B0 element - doesn't exist
         for mx_dims in weght_mx_dims_list:
             inp_num = mx_dims[0]
-            W = np.random.randn(*mx_dims) / np.sqrt(inp_num/2)
+            W = np.array(np.random.randn(*mx_dims)) / np.sqrt(inp_num/2)
             B = np.zeros((mx_dims[0], 1))
             WW.append(W)
             BB.append(B)
@@ -58,23 +65,15 @@ class NN(object):
         return X, X_mean, X_std
 
 
-    def J(self, WW, BB, X=None, Y=None, regularize=False):
+    def J(self, WW, BB, X=None, Y=None):
         if X is None or Y is None:
             X, Y = self.X, self.Y
             m = self.m
         else:
             m = X.shape[1]
-        AA, _ = self.__predict(X, WW, BB)
+        AA, _, _ = self.__predict(X, WW, BB)
         A = AA[-1]
-        if regularize:
-            # print(f'w shape: {w.shape}, b is: {b}, X.shape: {X.shape}, y.shape: {y.shape}, m is: {m}, a.shape is: {a.shape}')
-            l = self.l
-            reg_term = l*np.dot(w.T, w) / (2*m)
-            result = -(np.dot(Y, np.log(A).T) + np.dot((1-Y), np.log(1-A).T)) / m + reg_term
-        else:
-            result = -(np.dot(Y, np.log(A).T) + np.dot((1-Y), np.log(1-A).T)) / m
-        # print(type(result))
-        # print(result.shape)
+        result = -(np.dot(Y, np.log(A).T) + np.dot((1-Y), np.log(1-A).T)) / m
         return np.asscalar(result)
 
 
@@ -83,96 +82,89 @@ class NN(object):
 
 
     def relu(self, Z):
-        return np.maximum(0,Z)
+        A = np.maximum(0,Z)
+        return A
 
 
     def drelu(self, Z):
-        return np.array(Z >= 0, dtype=np.int)
+        dZ = np.array(Z >= 0, dtype=np.int)
+        return dZ
 
 
-    def __predict(self, X, WW, BB):
-        # w = self.w
-        # b = self.b
+    def __predict(self, X, WW, BB, dropout=False):
+        if not dropout:
+            KP = [1.0]*(self.num_layers)
+        else:
+            KP = self.keep_prob
+            
+
         AA = [X]
-        # print(f'X shape {X.shape}') 
-        # print(f'AA[0] shape {AA[0].shape}') 
-        ZZ = [None]
-        # for l in range(1,self.num_layers):
-        #     print(f'W{l} shape {WW[l].shape}') 
-        #     print(f'B{l} shape {BB[l].shape}')
-        # iterating through layers from 1 (starting from 0) to penultimate        
+        ZZ = [None]  
+        DD  = [ np.random.rand(*X.shape) < KP[0] ]
+        
+        AA[0] *= DD[0]
+        AA[0] = AA[0] / KP[0]
+
+
         for l in range(1,self.num_layers-1):
-            Z = np.dot(WW[l], AA[l-1]) + BB[l]
-            A = self.relu(Z)
+            Z = np.dot(WW[l], AA[l-1]) + BB[l]            
+            A = self.relu(Z)            
+            D = np.random.rand(*A.shape) < KP[l]            
+            A *= D            
+            A = A / KP[l]
             ZZ.append(Z)
             AA.append(A)
-        # everything is ok, if last WW has number l, then last AA at this point has number l-1
-        Z = np.dot(WW[-1], AA[-1]) + BB[-1]  
+            DD.append(D)
+
+        Z = np.dot(WW[-1], AA[-1]) + BB[-1]                          
         A = self.sigmoid(Z)
+        D = np.random.rand(*A.shape) < KP[-1]
+        A *= D
+        A = A / KP[l]
+
         ZZ.append(Z)
         AA.append(A)
-        # for l in range(self.num_layers):
-        #     if ZZ[l] is not None:
-        #         print(f'Z{l} len {ZZ[l].shape}')
-        #     if AA[l] is not None:
-        #         print(f'A{l} len {AA[l].shape}')
-        return AA, ZZ
+        DD.append(D)
+        return AA, ZZ, DD
 
 
     def predict(self, X, normalize=True):
         if normalize:
             X, X_mean, X_std = self.normalize(X)
-        AA, ZZ = self.__predict(X, self.WW, self.BB)
+        AA, ZZ, DD = self.__predict(X, self.WW, self.BB)
         return AA[-1]
-
-
-    def grad(self):
-        AA, ZZ = self.__predict(self.X, self.WW, self.BB)
-        # dZ has backwards numeration
-        dZZ = [None]*self.num_layers
-        dAA = [None]*self.num_layers
-        dWW = [None]*self.num_layers
-        dBB = [None]*self.num_layers
-
-        dZZ[-1] = AA[-1] - self.Y
-        R = self.l*self.WW[-1] # regularization term
-        dWW[-1] = (np.dot(dZZ[-1], AA[-2].T) + R) / self.m
-        dBB[-1] = np.sum(dZZ[-1], axis=1, keepdims=True) / self.m
-        for l in range(self.num_layers-2,0,-1):
-            dAA[l] = np.dot(self.WW[l+1].T, dZZ[l+1])  
-            dZZ[l] = dAA[l]*self.drelu(ZZ[l])
-            R = self.l*self.WW[l]
-            dWW[l] = (np.dot(dZZ[l], AA[l-1].T) + R) / self.m 
-            dBB[l] = np.sum(dZZ[l], axis=1, keepdims=True) / self.m 
-        return dWW, dBB
 
 
     def random_batch(self, batch_size):
         idx = np.random.randint(self.m, size=batch_size)
         X = self.X[:,idx]
-        Y = self.Y[:,idx]
+        Y = np.array(self.Y[:,idx])
         return X, Y
 
 
     def grad_minibatch(self, batch_size):
+        KP = self.keep_prob
         X, Y = self.random_batch(batch_size)
-        AA, ZZ = self.__predict(X, self.WW, self.BB)
+        AA, ZZ, DD = self.__predict(X, self.WW, self.BB, dropout=True)
+
         # dZ has backwards numeration
         dZZ = [None]*self.num_layers
         dAA = [None]*self.num_layers
         dWW = [None]*self.num_layers
         dBB = [None]*self.num_layers
-        dZZ[-1] = AA[-1] - Y
 
-        R = self.l*self.WW[-1] # regularization term
-        dWW[-1] = (np.dot(dZZ[-1], AA[-2].T) + R) / self.m
+        dZZ[-1] = (AA[-1] - Y) # we do not drop from output layer       
+
+
+        dWW[-1] = np.dot(dZZ[-1], AA[-2].T) / self.m
         dBB[-1] = np.sum(dZZ[-1], axis=1, keepdims=True) / self.m
         for l in range(self.num_layers-2,0,-1):
-            dAA[l] = np.dot(self.WW[l+1].T, dZZ[l+1])  
+            dAA[l] = np.dot(self.WW[l+1].T, dZZ[l+1]) * DD[l]
+            dAA[l] = dAA[l] / KP[l]
             dZZ[l] = dAA[l]*self.drelu(ZZ[l])
-            R = self.l*self.WW[l]
-            dWW[l] = (np.dot(dZZ[l], AA[l-1].T) + R) / self.m 
+            dWW[l] = np.dot(dZZ[l], AA[l-1].T) / self.m 
             dBB[l] = np.sum(dZZ[l], axis=1, keepdims=True) / self.m 
+
         return dWW, dBB
 
     def backprop_numcheck(self, iterations=1):        
@@ -197,12 +189,11 @@ class NN(object):
         nb = 1 - b     
         for i in range(iterations):
             dWW, dBB = self.grad_minibatch(batch_size)
-            for l in range(1,self.num_layers):
+            for l in range(1,self.num_layers):       
                 self.VdWW[l] = b*self.VdWW[l] + nb*dWW[l]
                 self.VdBB[l] = b*self.VdBB[l] + nb*dBB[l]
                 self.WW[l] -= self.alpha*self.VdWW[l]
                 self.BB[l] -= self.alpha*self.VdBB[l]
-
 
     def backprop_minibatch_adagrad(self, iterations=1, batch_size=256):   
         epsilon = 1e-7
@@ -217,7 +208,7 @@ class NN(object):
 
     def backprop_minibatch_rmsprop(self, iterations=1, batch_size=256, decay_rate=0.99):   
         epsilon = 1e-8
-        un_decay_rate = 1 - b2     
+        un_decay_rate = 1 - decay_rate   
         for i in range(iterations):
             dWW, dBB = self.grad_minibatch(batch_size)
             for l in range(1,self.num_layers):
@@ -243,6 +234,7 @@ class NN(object):
                 self.SdBB[l] = (b2 * self.SdBB[l] + nb2 * dBB[l]**2) / b2_bias_correction
                 self.WW[l] -= self.alpha * self.VdWW[l] / (np.sqrt(self.SdWW[l]) + epsilon)
                 self.BB[l] -= self.alpha * self.VdBB[l] / (np.sqrt(self.SdBB[l]) + epsilon)
+
 
 
     def num_grad(self):
@@ -305,13 +297,13 @@ if __name__ == '__main__':
 
     # model.backprop_numcheck(iterations=10)
     accuracy = model.accuracy(model.X, model.Y)
-    # print(f'Training accuracy: {accuracy}')
+    print(f'Training accuracy: {accuracy}')
 
     for i in range(1000):
         model.backprop(iterations=1000)
         cost = model.J(model.WW, model.BB)
         accuracy = model.accuracy(model.X, model.Y)
-        # print(f'[{i:04}] Cost is: {cost:.6f}, Training accuracy: {accuracy}')
+        print(f'[{i:04}] Cost is: {cost:.6f}, Training accuracy: {accuracy}')
         plot.plot_decision_surface(predictor_func)
         plot.add_line_cost_func(cost,1)
         

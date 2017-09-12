@@ -16,6 +16,33 @@ class NN(object):
 
         self.adagradcacheWW = [None] + [np.zeros(W_dims) for W_dims in self.W_dims]
         self.adagradcacheBB = [None] + [np.zeros((W_dims[0],1)) for W_dims in self.W_dims]
+        
+        # print('diagnostics')
+        # print('\n\n\nself.VdWW ')
+        # print(len(self.VdWW))
+        # for i in self.VdWW:
+        #     shape = str(i.shape) if isinstance(i, np.ndarray) else 'not an array'
+        #     print(f'type: {type(i)}    {shape}')
+
+        # print('\n\n\nself.VdBB ')
+        # print(len(self.VdBB))
+        # for i in self.VdBB:
+        #     shape = str(i.shape) if isinstance(i, np.ndarray) else 'not an array'
+        #     print(f'type: {type(i)}    {shape}')
+
+        # print('\n\n\nself.SdWW ')
+        # print(len(self.SdWW))
+        # for i in self.SdWW:
+        #     shape = str(i.shape) if isinstance(i, np.ndarray) else 'not an array'
+        #     print(f'type: {type(i)}    {shape}')
+
+        # print('\n\n\nself.SdBB ')
+        # print(len(self.SdBB))
+        # for i in self.SdBB:
+        #     shape = str(i.shape) if isinstance(i, np.ndarray) else 'not an array'
+        #     print(f'type: {type(i)}    {shape}')
+
+
 
         self.X_unnorm = X
         self.X, self.X_mean, self.X_std = self.normalize(self.X_unnorm, gen_stats=True)
@@ -216,7 +243,7 @@ class NN(object):
 
     def backprop_minibatch_rmsprop(self, iterations=1, batch_size=256, decay_rate=0.99):   
         epsilon = 1e-8
-        un_decay_rate = 1 - b2     
+        un_decay_rate = 1 - decay_rate   
         for i in range(iterations):
             dWW, dBB = self.grad_minibatch(batch_size)
             for l in range(1,self.num_layers):
@@ -232,8 +259,8 @@ class NN(object):
         epsilon = 1e-7
         for i in range(iterations):
             t = i + realiter
-            b1_bias_correction = nb1**t
-            b2_bias_correction = nb2**t
+            b1_bias_correction = 1 - b1**t
+            b2_bias_correction = 1 - b2**t
             dWW, dBB = self.grad_minibatch(batch_size)
             for l in range(1,self.num_layers):
                 self.VdWW[l] = (b1 * self.VdWW[l] + nb1 * dWW[l])    / b1_bias_correction

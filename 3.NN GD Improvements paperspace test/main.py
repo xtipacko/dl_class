@@ -37,11 +37,12 @@ def stats(tp, tn, fp, fn):
     return accuracy, precision, recall, f1
 
 def add_line_err_func(val, step, last_point):
+    if last_point is None:
+        last_point = (0,val)
     p1 = last_point
     p2 = (last_point[0]+step, val)
     plt.plot( (p1[0],p2[0]), (p1[1],p2[1]), color='red')
-    if last_point is None:
-        last_point = (0,val)
+    plt.pause(0.01)
     return p2
 
 
@@ -79,35 +80,39 @@ if __name__ == '__main__':
 
     
     from time import time as now
+    from itertools import product
 
     graph_last_point = None
     plt.ion()
+    learning_rates = [ 10**(2-7*np.random.rand()) for i in range(10)]
+    lambdas = [ 10**(2-7*np.random.rand()) for i in range(10)]
 
-    np.random.seed(122)
-    model = NN(X,Y, alpha=0.76, l=20, layers_list=[3072, 256, 128, 128, 64, 64, 64, 64, 1])
-    # model.backprop_numcheck(iterations=1000)
-    print('backprop started')
-    iterations = 500
-    # accuracy, precision, recall, f1 = stats(*model.accuracy(model.X, model.Y))
-    for i in range(600):
+    for a,l in product(learning_rates, lambdas):
+        np.random.seed(122)
+        model = NN(X,Y, alpha=a, l=l, layers_list=[3072, 128, 16, 2, 1])
+        # model.backprop_numcheck(iterations=1000)
+        print('backprop started')
+        iterations = 1000
+        # accuracy, precision, recall, f1 = stats(*model.accuracy(model.X, model.Y))
+        # for i in range(1):
         start = now()
         # cost = model.J(model.WW, model.BB)
         # accuracy, precision, recall, f1 = stats(*model.accuracy(model.X, model.Y))
         # cvcost = model.J(model.WW, model.BB, X = Xval, Y = Yval)
         # cvaccuracy, cvprecision, cvrecall, cvf1 = stats(*model.accuracy(Xval, Yval))
-        model.backprop_minibatch_momentum(iterations=iterations, batch_size=256, b=0.9)
+        model.backprop_minibatch_adam(iterations=iterations, realiter=i*iterations, batch_size=256, b1=0.9, b2=0.999)
         t = now() - start
         print('[{t:.3f}s]'.format(iter=(i+1)*iterations, iterations=iterations, t=t), end='')
         sys.stdout.flush()
-
+        
         cost = model.J(model.WW, model.BB)
         cvcost = model.J(model.WW, model.BB, X = Xval, Y = Yval)
         cvaccuracy, cvprecision, cvrecall, cvf1 = stats(*model.accuracy(Xval, Yval))
         cverr = 1 - cvaccuracy
         
-        print('\n[{iter:07}]  a = {a:>5}, l = {l:>3}, Train Cost: {cost:.7f}, CVal Error: {cverr:.4f}, F1 {cvf1:.4f}, Cost: {cvcost:.7f}'.format(iter=(i+1)*iterations, iterations=iterations, a=a, l=l, cost=cost, cverr=cverr, cvf1=cvf1, cvcost=cvcost))
+        print('[{iter:07}]  a = {a:>5}, l = {l:>3}, Train Cost: {cost:.7f}, CVal Error: {cverr:.4f}, F1 {cvf1:.4f}, Cost: {cvcost:.7f}'.format(iter=(i+1)*iterations, iterations=iterations, a=a, l=l, cost=cost, cverr=cverr, cvf1=cvf1, cvcost=cvcost))
         graph_last_point = add_line_err_func(cverr, iterations, graph_last_point)
-
+    
     #print(f'[{(i+1)*iterations:07}] Train: Cost {cost:.7f},  Ac {accuracy:.4f}, Pr {precision:.4f}, Re {recall:.4f}, F1 {f1:.4f};'
     #          f'     CVal: Cost {cvcost:.7f}, Ac {cvaccuracy:.4f}, Pr {cvprecision:.4f}, Re {cvrecall:.4f}, F1 {cvf1:.4f}')
 

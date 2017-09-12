@@ -1,0 +1,4 @@
+[5000][726.295s] a: 1.0000000    p: 0.9000000    Train Cost: 0.2439917   | CVal Accuracy: 0.7919       F1: 0.7856       Cost: nan
+[5000][694.080s] a: 0.5000000    p: 0.9250000    Train Cost: 0.2807231   | CVal Accuracy: 0.7806       F1: 0.7688       Cost: nan
+[5000][638.060s] a: 0.5000000    p: 0.9000000    Train Cost: 0.3620238   | CVal Accuracy: 0.7727       F1: 0.7649       Cost: nan         
+[5000][632.202s] a: 0.5000000    p: 0.8750000    Train Cost: 0.4148102   | CVal Accuracy: 0.7860       F1: 0.7781       Cost: nan     
