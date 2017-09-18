@@ -1,5 +1,5 @@
 import numpy as np
-
+from timeit import default_timer as now
 
 def GCD(a, b):
     while b:
@@ -11,8 +11,80 @@ def LCM(a, b):
     return a*b // GCD(a, b)
 
 
+def one_hot_encoding(Yraw, K):
+    H = np.arange(0, K).reshape(-1,1)
+    Y = (H == Yraw).astype(np.int32)
+    return Y
+
+
+def one_hot_decoding(Y):
+    return np.argmax(Y, axis=0)
+
+
+def sigmoid(Z):
+    return np.reciprocal(1 + np.exp(-Z))
+
+
+def desigmoid(Z):
+    sigm = sigmoid(Z)
+    return (1-sigm)*sigm
+
+
+def relu(Z):
+    A = np.maximum(0, Z)
+    return A
+
+
+def derelu(Z):
+    dZ = (Z >= 0).astype(np.int32)
+    return dZ
+
+
+def softmax(Z):
+    '''softmax with numerical stabilization'''
+    D = -np.max(Z, axis=0)   # (1 x m) - stabilizing term, I'm not sure about it...
+    exponents = np.exp(Z + D) # (K x m)
+    expsum = np.sum(exponents, axis=0, keepdims=True)
+    return exponents / expsum
+
+
+def desoftmax(dA):
+    pass
+
+
+class Batch_iterator:
+    def __init__(self, Xbatches, Ybatches):
+        assert len(Xbatches) == len(Ybatches), 'X, Y list of batches must have the same length' 
+        self.Xbatches, self.Ybatches = Xbatches, Ybatches
+        self.batches_num = len(self.Xbatches)
+        self.index = -1
+        self.iteration = -1
+        self.epoch = 0
+        self.total_iterations = 0
+    
+    def __call__(self, iterations):
+        self.total_iterations = iterations
+        return self
+
+
+    def __iter__(self): 
+        self.iteration = -1
+        self.epoch = 0
+        return self
+
+    def __next__(self):
+        self.iteration +=1
+        if self.iteration >= self.total_iterations:
+            raise StopIteration
+        self.epoch = self.iteration // self.batches_num
+        self.index = (self.index + 1) % self.batches_num 
+        return (self.Xbatches[self.index], self.Ybatches[self.index], 
+                self.iteration, self.epoch, self.index)
+
+
 class Multiclass_NN(object):
-    def __init__(self, X, Y, learning_rate=1,
+    def __init__(self, X, Y, learning_rate=1, 
+                 momentum_beta = 0.9, adam_beta = 0.99,
                  X_dev=None, Y_dev=None,
                  layers_list=[3072, 256, 128, 10],
                  keep_prob=[1.0,1.0,1.0,1.0],
@@ -23,6 +95,8 @@ class Multiclass_NN(object):
         assert (X_dev is None) == (Y_dev is None), 'You\'ve forgotten either X_dev or Y_dev'
 
         self.learning_rate = learning_rate
+        self.momentum_beta = momentum_beta
+        self.adam_beta = adam_beta
         self.optimizer = optimizer
         self.layers_list = layers_list
         self.KP = keep_prob
@@ -34,8 +108,13 @@ class Multiclass_NN(object):
 
         self.W_dims, self.B_dims = self.calc_dims(self.layers_list, self.L)
         self.W, self.B = self.He_init_weights(self.W_dims, self.B_dims)
+
         self.A = [None]*self.L
         self.Z = [None]*self.L
+        self.dZ = [None]*self.L
+        self.dA = [None]*self.L
+        self.dB = [None]*self.L
+        self.dW = [None]*self.L
 
         self.VdW, self.VdB = self.init_optimizer(self.W_dims, self.B_dims, optimizer=self.optimizer)
 
@@ -43,7 +122,7 @@ class Multiclass_NN(object):
         self.Yraw = Y
 
         self.X, self.X_mean, self.X_std = self.normalize(self.Xraw, gen_stats=True)
-        self.Y = self.one_hot_encoding(self.Yraw, self.K)
+        self.Y = one_hot_encoding(self.Yraw, self.K)
         self.minibatch_size = minibatch_size
 
         # shuffle data
@@ -57,7 +136,7 @@ class Multiclass_NN(object):
         else:
             self.X_dev = X_dev
             self.Y_dev = Y_dev
-        self.Y_dev = self.one_hot_encoding(self.Y_dev, self.K)
+        self.Y_dev = one_hot_encoding(self.Y_dev, self.K)
         self.m_dev = self.X_dev.shape[1]
         # least comon multiplier between m and mini-batch size
         m = self.X.shape[1]
@@ -72,6 +151,7 @@ class Multiclass_NN(object):
         # shuffle X, Y
         # self.X, self.Y = self.shuffle(self.X, self.Y)
         # 6.slice X to  minibatches
+
         self.batches_num = self.m_train  // self.minibatch_size
         last_mini_batch_idx = -(self.m_train % self.minibatch_size)
         if last_mini_batch_idx != 0:
@@ -83,6 +163,8 @@ class Multiclass_NN(object):
         else:
             self.Xbatches = np.array_split(self.X, self.batches_num, axis=1)
             self.Ybatches = np.array_split(self.Y, self.batches_num, axis=1)
+        
+        self.batchiterator = Batch_iterator(self.Xbatches, self.Ybatches)
 
 
     def shuffle(self, X, Y):
@@ -91,8 +173,10 @@ class Multiclass_NN(object):
         # Y = np.array(Y, dtype=np.int)
         return X_shuffled, Y_shuffled
 
+
     def slice_to_minibatches(self, X, Y, size):
         pass
+
 
     def init_optimizer(self, W_dims, B_dims, optimizer='momentum'):
         VdW = [None if dims is None else np.zeros(dims) for dims in W_dims]
@@ -127,106 +211,135 @@ class Multiclass_NN(object):
         return X_norm, X_mean, X_std
 
 
-    def one_hot_encoding(self, Yraw, K):
-        H = np.arange(0, K).reshape(-1,1)
-        Y = (H == Yraw).astype(np.int32)
-        return Y
-
-
-    def sigmoid(self, Z):
-        return np.reciprocal(1 + np.exp(-Z))
-
-
-    def desigmoid(self, Z):
-        sigm = self.sigmoid(Z)
-        return (1-sigm)*sigm
-
-
-    def relu(self, Z):
-        A = np.maximum(0, Z)
-        return A
-
-
-    def derelu(self, Z):
-        dZ = (Z >= 0).astype(np.int32)
-        return dZ
-
-
-    def softmax(self, Z):
-        '''softmax with numerical stabilization'''
-        D = -np.max(Z, axis=0)   # (1 x m) - stabilizing term, I'm not sure about it...
-        exponents = np.exp(Z + D) # (K x m)
-        expsum = np.sum(exponents, axis=0)
-        return exponents / expsum
-
-
-    def desoftmax(self, dA):
-        pass
-
-
     def new_dropout_mask(self, KP):
         for l in range(1,self.L):
             mask = (np.random.rand(self.layers_list[l],1) < KP[l]).astype(np.int32)
-            self.D[l] = mask
-
+            self.D[l] = mask / KP[l]
 
 
     def forward(self, X, W = None, B = None, dropout=False):
+        A     = self.A
+        Z     = self.Z
+        D     = self.D
+        KP    = self.KP
+        L     = self.L
         if W is None or B is None:
             W = self.W
             B = self.B
         if dropout:
-            self.new_dropout_mask(self.KP)
+            self.new_dropout_mask(KP)
         else:
-            self.new_dropout_mask([1.0]*self.L)
+            self.new_dropout_mask([1.0]*L)
 
-        self.A[0] = X
-        for l in range(1, self.L-1):
-            self.Z[l] = self.W[l] @ self.A[l-1] + self.B[l]
-            self.A[l] = self.relu(self.Z[L]) * self.D[l] / self.KP[l]
-        self.Z[-1] = self.W[-1] @ self.A[-2] + self.B[-1]
-        self.A[-1] = self.softmax(self.Z) * self.D[l] / self.KP[l]
+        A[0] = X
+        for l in range(1, L-1):
+            Z[l] = W[l] @ A[l-1] + B[l]
+            A[l] = relu(Z[l]) * D[l]         
+        Z[-1] = W[-1] @ A[-2] + B[-1]
+        A[-1] = softmax(Z[-1]) * D[-1]
+        
 
 
-    def predict(self, ):
-        pass
+    def predict(self, X, W = None, B = None):
+        X, _, _ = self.normalize(X)
+        self.forward(X)
+        return self.A[-1]
 
 
     def cost(self, AL, Y):
+        #return np.mean(-np.sum(Y*np.log(AL), axis=0, keepdims=True))
+        Y = Y.astype(np.bool)
+        Yhj = AL[Y]
+        Losses = -np.log(Yhj[np.nonzero(Yhj)])
+        return np.mean(Losses)
+
+
+    def backprop(self, X, Y):
+        A  = self.A
+        Z  = self.Z
+        D  = self.D
+        L  = self.L
+        m  = self.minibatch_size
+        dZ = self.dZ
+        dA = self.dA
+        dB = self.dB
+        dW = self.dW
+        B = self.B
+        W = self.W
+
+        self.forward(X, dropout=True)
+
+        dZ[-1] = A[-1] - Y
+        dW[-1] = (dZ[-1] @ A[-2].T) / m
+        dB[-1] = np.sum(dZ[-1], axis=1, keepdims=True) / m
+        for l in range(L-2, 0, -1):
+            dA[l] = (W[l+1].T @ dZ[l+1]) * D[l]
+            dZ[l] = dA[l] * derelu(Z[l]) 
+            dW[l] = (dZ[l] @ A[l-1].T) / m
+            dB[l] = np.sum(dZ[l], axis=1, keepdims=True) / m
+        # print(self.W[1])
+        # print(self.W[1].shape)
+        # exit()
+
+
+    def sgd_train(self, iterations=1000, yld=10):
         pass
 
 
-    def backprop(self, ):
+    def adam_train(self, iterations=1000, yld=10):
         pass
 
 
-    def momentum(self, ):
-        pass
-
-
-    def sgd(self, ):
-        pass
-
-
-    def adam(self, ):
-        pass
-
-
-    def update(self, optimizer='momentum'):
-        pass
-
-
-    def train(self, epochs=10, optimizer='momentum'):
-        pass
+    def momentum_train(self, iterations=1000, yld=10):
+        b = self.momentum_beta    
+        nb = 1 - b
+        a = self.learning_rate
+        L = self.L
+        dW = self.dW
+        dB = self.dB
+        VdW = self.VdW
+        VdB = self.VdB         
+        for X, Y, i, epoch, idx in self.batchiterator(iterations):
+            #momentum
+         #   start_train = now()
+            self.backprop(X, Y)
+            for l in range(1, L):
+                self.VdW[l] = b*self.VdW[l] + nb*dW[l]
+                self.VdB[l] = b*self.VdB[l] + nb*dB[l]
+                self.W[l] -= a*self.VdW[l]
+                self.B[l] -= a*self.VdB[l]
+           # print(f'[ITERATION TIME: {now()-start_train:.3f}ms]')
+            #metrics
+            if not i % yld:
+                start_stats = now()
+                train_cost = self.cost(self.A[-1], Y)
+                AL = self.predict(self.X_dev)                
+                dev_cost = self.cost(AL, self.Y_dev)
+                accuracy, precision, recall, f1 = self.statistics(AL, self.Y_dev)
+                info = {"iteration"     : i,
+                        "epoch"         : epoch,
+                        "batch_idx"     : idx,
+                        "train_cost"    : np.asscalar(train_cost),
+                        "dev_cost"      : np.asscalar(dev_cost),
+                        "dev_accuracy"  : np.asscalar(accuracy),
+                        "dev_precision" : precision,
+                        "dev_recall"    : recall,
+                        "dev_f1"        : f1}
+            #    print(f'[STATS TIME: {now()-start_stats:.3f}ms]')
+                yield info
 
 
     def numcheck(self, ):
         pass
 
 
-    def statistics(self, ):
+    def statistics(self, AL, Y):
+        ALraw = one_hot_decoding(AL)
+        Yraw = one_hot_decoding(Y)
+        eq = (ALraw == Yraw)
+        accuracy = np.mean(eq)
         #accuracy, precision, recall, f1
-        pass
+        return accuracy,0,0,0
 
 
 def list_of_mx_tostr(listmx):
