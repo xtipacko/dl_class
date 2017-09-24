@@ -106,17 +106,29 @@ class Multiclass_NN(object):
 
         self.K = self.layers_list[-1] # number of classes
 
-        self.W_dims, self.B_dims = self.calc_dims(self.layers_list, self.L)
-        self.W, self.B = self.He_init_weights(self.W_dims, self.B_dims)
+        self.W_dims, self.Z_dims = self.calc_dims(self.layers_list, self.L)
+        self.W, self.Gamma, self.Beta = self.He_init_weights(self.W_dims, self.Z_dims)
 
-        self.A = [None]*self.L
-        self.Z = [None]*self.L
-        self.dZ = [None]*self.L
-        self.dA = [None]*self.L
-        self.dB = [None]*self.L
-        self.dW = [None]*self.L
+        #initializing batch norm variables for test time
+        self.avgZmean = [None if dims is None else np.zeros(dims) for dims in self.Z_dims]
+        self.avgZstd  = [None if dims is None else np.zeros(dims)  for dims in self.Z_dims]
+        self.epsilon = 1e-7
 
-        self.VdW, self.VdB = self.init_optimizer(self.W_dims, self.B_dims, optimizer=self.optimizer)
+        self.A      = [None]*self.L
+        self.Z      = [None]*self.L        
+        self.Znorm  = [None]*self.L        
+        self.Zbn    = [None]*self.L        
+        self.dZ     = [None]*self.L
+        self.dZnorm = [None]*self.L
+        self.dZbn   = [None]*self.L
+        self.dA     = [None]*self.L
+        self.dBeta  = [None]*self.L
+        self.dGamma = [None]*self.L
+        self.dW     = [None]*self.L
+
+        self.VdW, self.VdGamma, self.VdBeta = self.init_optimizer(self.W_dims, 
+                                                                  self.Z_dims,
+                                                                  optimizer=self.optimizer)
 
         self.Xraw = X
         self.Yraw = Y
@@ -138,19 +150,11 @@ class Multiclass_NN(object):
             self.Y_dev = Y_dev
         self.Y_dev = one_hot_encoding(self.Y_dev, self.K)
         self.m_dev = self.X_dev.shape[1]
-        # least comon multiplier between m and mini-batch size
-        m = self.X.shape[1]
-        # m_lcm = LCM(m, self.minibatch_size)
-        # replicate X, Y (m_lcm // m) times
-        # repeat_num = m_lcm // m
-        # self.X = np.tile(self.X, repeat_num)
-        # self.Y = np.tile(self.Y, repeat_num)
-        self.m_train = m
-        # self.m_train = m_lcm
 
-        # shuffle X, Y
-        # self.X, self.Y = self.shuffle(self.X, self.Y)
-        # 6.slice X to  minibatches
+        m = self.X.shape[1]
+
+        self.m_train = m
+
 
         self.batches_num = self.m_train  // self.minibatch_size
         last_mini_batch_idx = -(self.m_train % self.minibatch_size)
@@ -178,24 +182,27 @@ class Multiclass_NN(object):
         pass
 
 
-    def init_optimizer(self, W_dims, B_dims, optimizer='momentum'):
+    def init_optimizer(self, W_dims, Z_dims, optimizer='momentum'):
         VdW = [None if dims is None else np.zeros(dims) for dims in W_dims]
-        VdB = [None if dims is None else np.zeros((dims,1)) for dims in B_dims]
-        return VdW, VdB
+        VdBeta = [None if dims is None else np.zeros((dims,1)) for dims in Z_dims]
+        VdGamma = [None if dims is None else np.zeros((dims,1)) for dims in Z_dims] # ?
+        return VdW, VdGamma, VdBeta
 
 
     def calc_dims(self, layers_list, L):
         W_dims = [None] + [ (layers_list[l+1], layers_list[l]) for l in range(L-1) ]
-        B_dims = [None] + [ layers_list[l] for l in range(1,L) ]
-        return W_dims, B_dims
+        Z_dims  = [None] + [ layers_list[l] for l in range(1,L) ]
+        return W_dims, Z_dims
 
 
-    def He_init_weights(self, W_dims, B_dims):
-        init_Wn = lambda dims: np.random.randn(*dims)/np.sqrt(dims[1]/2)
+    def He_init_weights(self, W_dims, Z_dims):
+        init_Wn = lambda dims: np.random.randn(*dims) / np.sqrt(dims[1]/2)
         W = [ None if dims is None else init_Wn(dims) for dims in W_dims ]
-        init_Bn = lambda dims: np.zeros((dims[0], 1))
-        B = [ None if dims is None else init_Bn(dims) for dims in W_dims ]
-        return W, B
+        init_Beta_n = lambda dims: np.zeros((dims[0], 1))
+        Beta = [ None if dims is None else init_Beta_n(dims) for dims in Z_dims ]
+        init_Gamma_n = lambda dims: np.ones((dims[0], 1))
+        Gamma = [ None if dims is None else init_Gamma_n(dims) for dims in Z_dims ]
+        return W, Gamma, Beta
 
 
     def normalize(self, X_unnorm, gen_stats=False):
@@ -217,15 +224,24 @@ class Multiclass_NN(object):
             self.D[l] = mask / KP[l]
 
 
-    def forward(self, X, W = None, B = None, dropout=False):
-        A     = self.A
-        Z     = self.Z
-        D     = self.D
-        KP    = self.KP
-        L     = self.L
-        if W is None or B is None:
+    def forward(self, X, W = None, Beta = None, Gamma = None, dropout=False, testtime=False):
+        A        = self.A
+        Z        = self.Z
+        Znorm    = self.Znorm
+        Zbn      = self.Zbn
+        D        = self.D
+        KP       = self.KP
+        L        = self.L
+        Beta     = self.Beta
+        Gamma    = self.Gamma        
+        avgZmean = self.avgZmean
+        avgZstd  = self.avgZstd
+        epsilon  = self.epsilon
+
+        if W is None or Beta is None or Gamma is None:
             W = self.W
-            B = self.B
+            Beta = self.Beta
+            Gamma = self.Gamma
         if dropout:
             self.new_dropout_mask(KP)
         else:
@@ -233,11 +249,29 @@ class Multiclass_NN(object):
 
         A[0] = X
         for l in range(1, L-1):
-            Z[l] = W[l] @ A[l-1] + B[l]
-            A[l] = relu(Z[l]) * D[l]         
-        Z[-1] = W[-1] @ A[-2] + B[-1]
-        A[-1] = softmax(Z[-1]) * D[-1]
-        
+            Z[l] = W[l] @ A[l-1]
+
+            Zmean = avgZmean[l] if testtime else np.mean(Z[l])
+            Zstd  = avgZstd[l]  if testtime else np.std(Z[l])
+            Znorm[l] = (Z[l] - Zmean) / (Zstd + epsilon) # variance
+            Zbn[l] = Znorm[l] * Gamma[l] + Beta[l]
+
+            A[l] = relu(Zbn[l]) * D[l]  
+            if not testtime:
+                avgZmean[l] = 0.9*avgZmean[l] + 0.1*Zmean
+                avgZstd[l]  = 0.9*avgZstd[l]  + 0.1*Zstd
+
+        Z[-1] = W[-1] @ A[-2]
+
+        Zmean = avgZmean[-1] if testtime else np.mean(Z[-1])
+        Zstd  = avgZstd[-1]  if testtime else np.std(Z[-1])
+        Znorm[-1] = (Z[-1] - Zmean) / (Zstd + epsilon)
+        Zbn[-1] = Znorm[-1] * Gamma[-1] + Beta[-1]
+
+        A[-1] = softmax(Zbn[-1]) * D[-1]
+        if not testtime:
+            avgZmean[-1] = 0.9*avgZmean[-1] + 0.1*Zmean
+            avgZstd[-1]  = 0.9*avgZstd[-1]  + 0.1*Zstd 
 
 
     def predict(self, X, W = None, B = None):
@@ -255,23 +289,30 @@ class Multiclass_NN(object):
 
 
     def backprop(self, X, Y):
-        A  = self.A
-        Z  = self.Z
-        D  = self.D
-        L  = self.L
-        m  = self.minibatch_size
-        dZ = self.dZ
-        dA = self.dA
-        dB = self.dB
-        dW = self.dW
-        B = self.B
-        W = self.W
+        A      = self.A
+        Z      = self.Z
+        D      = self.D
+        L      = self.L
+        m      = self.minibatch_size
+        dZ     = self.dZ
+        dZbn   = self.dZbn
+        dZnorm = self.dZnorm
+        dA     = self.dA
+        dBeta  = self.dBeta
+        dGamma = self.ddGamma
+        dW     = self.dW
+        Beta   = self.Beta
+        Gamma  = self.Gamma
+        W      = self.W
 
         self.forward(X, dropout=True)
 
-        dZ[-1] = A[-1] - Y
-        dW[-1] = (dZ[-1] @ A[-2].T) / m
-        dB[-1] = np.sum(dZ[-1], axis=1, keepdims=True) / m
+        dZbn[-1]  = A[-1] - Y
+        dBeta[-1]  = np.sum(dZbn[-1], axis=1, keepdims=True) / m
+        dGamma[-1] = 
+        dW[-1] = (dZbn[-1] @ A[-2].T) / m
+
+        
         for l in range(L-2, 0, -1):
             dA[l] = (W[l+1].T @ dZ[l+1]) * D[l]
             dZ[l] = dA[l] * derelu(Z[l]) 
@@ -401,3 +442,4 @@ if __name__ == '__main__':
 
 
     x.forward(0,0,0)
+
