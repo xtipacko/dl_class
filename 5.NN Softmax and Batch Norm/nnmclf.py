@@ -48,6 +48,26 @@ def softmax(Z):
     return exponents / expsum
 
 
+def batchnorm(Z, Gamma, Beta, avgZmean, avgZstd, epsilon, testtime=False):
+    m = Z.shape[1]
+    Zmean = avgZmean if testtime else np.mean(Z, axis=1, keepdims=True)
+    Z0 = Z-Zmean
+    Zvar = None if testtime else np.sum(np.square(Z0), axis=1, keepdims=True) / m
+    Zstd = avgZstd if testtime else np.sqrt(Zvar+epsilon)
+    Znorm = Z0 / Zstd
+    Zbn = Znorm*Gamma + Beta
+    return Zmean, Z0, Zvar, Zstd, Znorm, Zbn
+
+
+def debatchnorm(dZbn, Gamma, Beta, Znorm, Zvar, Zstd, Z0, m, epsilon):
+    dBeta = np.sum(dZbn, axis=1, keepdims=True)
+    dGamma = np.sum(dZbn * Znorm, axis=1, keepdims=True)
+    dZnorm = dZbn * Gamma
+    dZ0 = (dZnorm/Zstd) - Z0*(np.sum(dZnorm*Z0, axis=1, keepdims=True) / ((Zvar+epsilon)*Zstd*m)) 
+    dZ = dZ0 - np.sum(dZ0, axis=1, keepdims=True) / m
+    return dZ, dGamma, dBeta
+
+
 def desoftmax(dA):
     pass
 
@@ -110,21 +130,27 @@ class Multiclass_NN(object):
         self.W, self.Gamma, self.Beta = self.He_init_weights(self.W_dims, self.Z_dims)
 
         #initializing batch norm variables for test time
-        self.avgZmean = [None if dims is None else np.zeros(dims) for dims in self.Z_dims]
-        self.avgZstd  = [None if dims is None else np.zeros(dims)  for dims in self.Z_dims]
+        self.avgZmean = [None if dims is None else np.zeros((dims,1)) for dims in self.Z_dims]
+        self.avgZstd  = [None if dims is None else np.zeros((dims,1))  for dims in self.Z_dims]
         self.epsilon = 1e-7
 
         self.A      = [None]*self.L
-        self.Z      = [None]*self.L        
-        self.Znorm  = [None]*self.L        
-        self.Zbn    = [None]*self.L        
+        self.Z      = [None]*self.L   
+        self.Zmean  = [None]*self.L
+        self.Z0     = [None]*self.L       
+        self.Zvar   = [None]*self.L
+        self.Zstd   = [None]*self.L
+        self.Znorm  = [None]*self.L  
+        self.Zbn    = [None]*self.L 
+
         self.dZ     = [None]*self.L
-        self.dZnorm = [None]*self.L
-        self.dZbn   = [None]*self.L
+        #self.dZnorm = [None]*self.L
+        # self.dZbn   = [None]*self.L
         self.dA     = [None]*self.L
         self.dBeta  = [None]*self.L
         self.dGamma = [None]*self.L
         self.dW     = [None]*self.L
+
 
         self.VdW, self.VdGamma, self.VdBeta = self.init_optimizer(self.W_dims, 
                                                                   self.Z_dims,
@@ -198,9 +224,9 @@ class Multiclass_NN(object):
     def He_init_weights(self, W_dims, Z_dims):
         init_Wn = lambda dims: np.random.randn(*dims) / np.sqrt(dims[1]/2)
         W = [ None if dims is None else init_Wn(dims) for dims in W_dims ]
-        init_Beta_n = lambda dims: np.zeros((dims[0], 1))
+        init_Beta_n = lambda dims: np.zeros((dims, 1))
         Beta = [ None if dims is None else init_Beta_n(dims) for dims in Z_dims ]
-        init_Gamma_n = lambda dims: np.ones((dims[0], 1))
+        init_Gamma_n = lambda dims: np.ones((dims, 1))
         Gamma = [ None if dims is None else init_Gamma_n(dims) for dims in Z_dims ]
         return W, Gamma, Beta
 
@@ -227,8 +253,12 @@ class Multiclass_NN(object):
     def forward(self, X, W = None, Beta = None, Gamma = None, dropout=False, testtime=False):
         A        = self.A
         Z        = self.Z
+        Zmean    = self.Zmean
+        Z0       = self.Z0   
+        Zvar     = self.Zvar 
+        Zstd     = self.Zstd 
         Znorm    = self.Znorm
-        Zbn      = self.Zbn
+        Zbn      = self.Zbn  
         D        = self.D
         KP       = self.KP
         L        = self.L
@@ -251,27 +281,25 @@ class Multiclass_NN(object):
         for l in range(1, L-1):
             Z[l] = W[l] @ A[l-1]
 
-            Zmean = avgZmean[l] if testtime else np.mean(Z[l])
-            Zstd  = avgZstd[l]  if testtime else np.std(Z[l])
-            Znorm[l] = (Z[l] - Zmean) / (Zstd + epsilon) # variance
-            Zbn[l] = Znorm[l] * Gamma[l] + Beta[l]
-
+            (Zmean[l], Z0[l], Zvar[l], 
+            Zstd[l], Znorm[l], Zbn[l]) = batchnorm(Z[l], Gamma[l], Beta[l], 
+                                                   avgZmean[l], avgZstd[l],
+                                                   epsilon, testtime=testtime)
             A[l] = relu(Zbn[l]) * D[l]  
             if not testtime:
-                avgZmean[l] = 0.9*avgZmean[l] + 0.1*Zmean
-                avgZstd[l]  = 0.9*avgZstd[l]  + 0.1*Zstd
+                avgZmean[l] = 0.7*avgZmean[l] + 0.3*Zmean[l]
+                avgZstd[l]  = 0.7*avgZstd[l]  + 0.3*Zstd[l]
 
         Z[-1] = W[-1] @ A[-2]
 
-        Zmean = avgZmean[-1] if testtime else np.mean(Z[-1])
-        Zstd  = avgZstd[-1]  if testtime else np.std(Z[-1])
-        Znorm[-1] = (Z[-1] - Zmean) / (Zstd + epsilon)
-        Zbn[-1] = Znorm[-1] * Gamma[-1] + Beta[-1]
 
+        (Zmean[-1], Z0[-1], Zvar[-1], 
+        Zstd[-1], Znorm[-1], Zbn[-1]) = batchnorm(Z[-1], Gamma[-1], Beta[-1], 
+                                                  avgZmean[-1], avgZstd[-1], epsilon, testtime=testtime)
         A[-1] = softmax(Zbn[-1]) * D[-1]
         if not testtime:
-            avgZmean[-1] = 0.9*avgZmean[-1] + 0.1*Zmean
-            avgZstd[-1]  = 0.9*avgZstd[-1]  + 0.1*Zstd 
+            avgZmean[-1] = 0.7*avgZmean[-1] + 0.3*Zmean[-1]
+            avgZstd[-1]  = 0.7*avgZstd[-1]  + 0.3*Zstd[-1]
 
 
     def predict(self, X, W = None, B = None):
@@ -291,36 +319,38 @@ class Multiclass_NN(object):
     def backprop(self, X, Y):
         A      = self.A
         Z      = self.Z
+        Z0     = self.Z0   
+        Zvar   = self.Zvar 
+        Zstd   = self.Zstd 
+        Znorm  = self.Znorm
+        Zbn    = self.Zbn  
         D      = self.D
         L      = self.L
         m      = self.minibatch_size
         dZ     = self.dZ
-        dZbn   = self.dZbn
-        dZnorm = self.dZnorm
-        dA     = self.dA
         dBeta  = self.dBeta
-        dGamma = self.ddGamma
+        dGamma = self.dGamma
         dW     = self.dW
         Beta   = self.Beta
         Gamma  = self.Gamma
         W      = self.W
+        epsilon = self.epsilon
 
         self.forward(X, dropout=True)
 
-        dZbn[-1]  = A[-1] - Y
-        dBeta[-1]  = np.sum(dZbn[-1], axis=1, keepdims=True) / m
-        dGamma[-1] = 
-        dW[-1] = (dZbn[-1] @ A[-2].T) / m
-
-        
+        dZbn  = (A[-1] - Y) / m
+        dZ[-1], dGamma[-1], dBeta[-1] = debatchnorm(dZbn, Gamma[-1], Beta[-1], 
+                                                    Znorm[-1], Zvar[-1], Zstd[-1], 
+                                                    Z0[-1], m, epsilon)
+        dW[-1] = dZ[-1] @ A[-2].T
         for l in range(L-2, 0, -1):
-            dA[l] = (W[l+1].T @ dZ[l+1]) * D[l]
-            dZ[l] = dA[l] * derelu(Z[l]) 
-            dW[l] = (dZ[l] @ A[l-1].T) / m
-            dB[l] = np.sum(dZ[l], axis=1, keepdims=True) / m
-        # print(self.W[1])
-        # print(self.W[1].shape)
-        # exit()
+            dA = (W[l+1].T @ dZ[l+1]) * D[l]
+            dZbn = dA * derelu(Zbn[l])
+            dZ[l], dGamma[l], dBeta[l] = debatchnorm(dZbn, Gamma[l], Beta[l], 
+                                                     Znorm[l], Zvar[l], Zstd[l], 
+                                                     Z0[l], m, epsilon)
+            dW[l] = dZ[l] @ A[l-1].T
+
 
 
     def sgd_train(self, iterations=1000, yld=10):
@@ -332,26 +362,31 @@ class Multiclass_NN(object):
 
 
     def momentum_train(self, iterations=1000, yld=10):
-        b = self.momentum_beta    
+        b  = self.momentum_beta    
         nb = 1 - b
-        a = self.learning_rate
-        L = self.L
-        dW = self.dW
-        dB = self.dB
-        VdW = self.VdW
-        VdB = self.VdB         
+        a  = self.learning_rate
+        L  = self.L
+        dW     = self.dW
+        dBeta  = self.dBeta
+        dGamma = self.dGamma
+        VdW     = self.VdW
+        VdGamma = self.VdGamma
+        VdBeta  = self.VdBeta
+        start_train = now()
         for X, Y, i, epoch, idx in self.batchiterator(iterations):
-            #momentum
-         #   start_train = now()
+            #momentum            
             self.backprop(X, Y)
             for l in range(1, L):
                 self.VdW[l] = b*self.VdW[l] + nb*dW[l]
-                self.VdB[l] = b*self.VdB[l] + nb*dB[l]
+                self.VdGamma[l] = b*self.VdGamma[l] + nb*dGamma[l]
+                self.VdBeta[l] = b*self.VdBeta[l] + nb*dBeta[l]
                 self.W[l] -= a*self.VdW[l]
-                self.B[l] -= a*self.VdB[l]
-           # print(f'[ITERATION TIME: {now()-start_train:.3f}ms]')
+                self.Beta[l] -= a*self.VdBeta[l]
+                self.Gamma[l] -= a*self.VdGamma[l]
+            
             #metrics
             if not i % yld:
+                train_time = now() - start_train
                 start_stats = now()
                 train_cost = self.cost(self.A[-1], Y)
                 AL = self.predict(self.X_dev)                
@@ -365,8 +400,10 @@ class Multiclass_NN(object):
                         "dev_accuracy"  : np.asscalar(accuracy),
                         "dev_precision" : precision,
                         "dev_recall"    : recall,
-                        "dev_f1"        : f1}
-            #    print(f'[STATS TIME: {now()-start_stats:.3f}ms]')
+                        "dev_f1"        : f1,
+                        "report_time"   : now() - start_stats,
+                        "train_time"    : train_time}
+                start_train = now()
                 yield info
 
 
