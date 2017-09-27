@@ -30,13 +30,13 @@ def cv(X, Y, Xtest, Ytest):
                                   keep_prob=keep_prob, 
                                   layers_list=layers_list, 
                                   minibatch_size=256)
-            template = '[{iteration:06}, epoch:{epoch}] Train cost: {train_cost:.7f};   Dev cost: {dev_cost:.7f}, accuracy: {dev_accuracy:.4f}'
+            template = '[{iteration:06}, epoch:{epoch}, {train_time:.3f}/{report_time:.3f} ms] Train cost: {train_cost:.7f};   Dev cost: {dev_cost:.7f}, accuracy: {dev_accuracy:.4f}'
     
             print('backprop started')
             try:
-                for info in model.momentum_train(iterations=1000, yld=40):        
+                for info in model.momentum_train(iterations=10000, yld=100):        
                     print(template.format(**info))
-                    if np.isnan(info["train_cost"]) and  info["iteration"] >= 80:
+                    if np.isnan(info["train_cost"]) and  info["iteration"] >= 201:
                         break
             finally:    
                 if info["dev_accuracy"] > 0.4:
@@ -48,7 +48,7 @@ def cv(X, Y, Xtest, Ytest):
 
 def train(X, Y, Xtest, Ytest):
     learning_rate = 2
-    keep_prob =   [ 1.0,  0.95,  0.95,  0.95,  0.95, 0.95, 0.95, 0.95,    1] 
+    keep_prob =   [ 1.0,  0.80,  0.80,  0.80,  0.80, 0.80, 0.80, 0.80,    1] 
     layers_list = [3072,  1024,  1024,   512,   512,  512,  128,  128,   10]
     # keep_prob   = [ 1.0,  0.5,    0.5,    0.5, 1.0] 
     # layers_list = [3072,  3072,  3072,   3072,  10]
@@ -59,7 +59,7 @@ def train(X, Y, Xtest, Ytest):
                           learning_rate=learning_rate, 
                           keep_prob=keep_prob, 
                           layers_list=layers_list, 
-                          minibatch_size=128)
+                          minibatch_size=256)
 
     template = '[{iteration:06}, epoch:{epoch}, {train_time:.3f}/{report_time:.3f} ms] Train cost: {train_cost:.7f};   Dev cost: {dev_cost:.7f}, accuracy: {dev_accuracy:.4f}'
     if os.path.isfile(fname):
@@ -71,7 +71,7 @@ def train(X, Y, Xtest, Ytest):
         print('weights loaded')
     print('backprop started')
     try:
-        for info in model.momentum_train(iterations=100000, yld=200):        
+        for info in model.momentum_train(iterations=100000, yld=100):        
             print(template.format(**info))
             # if np.isnan(info["train_cost"]) and  info["iteration"] >= 80:
             #     break
