@@ -108,7 +108,8 @@ class Multiclass_NN(object):
                  X_dev=None, Y_dev=None,
                  layers_list=[3072, 256, 128, 10],
                  keep_prob=[1.0,1.0,1.0,1.0],
-                 optimizer='momentum', minibatch_size = 16 ):
+                 optimizer='momentum', minibatch_size = 16,
+                 preinitialized=False):
         assert isinstance(keep_prob, list), 'keep_probe is a list of probabilities of keeping neurons during dropout in each layer'
         assert len(keep_prob) == len(layers_list), 'keep_prob should have the same length as layers_list'
         assert layers_list[0] == X.shape[0], 'Number of inputs (A0) in layers_list should be equal to number of rows in X'
@@ -158,43 +159,43 @@ class Multiclass_NN(object):
 
         self.Xraw = X
         self.Yraw = Y
+        if not preinitialized:
+            self.X, self.X_mean, self.X_std = self.normalize(self.Xraw, gen_stats=True)
+            self.Y = one_hot_encoding(self.Yraw, self.K)
+            self.minibatch_size = minibatch_size
 
-        self.X, self.X_mean, self.X_std = self.normalize(self.Xraw, gen_stats=True)
-        self.Y = one_hot_encoding(self.Yraw, self.K)
-        self.minibatch_size = minibatch_size
+            # shuffle data
+            self.X, self.Y = self.shuffle(self.X, self.Y)
+            # Add (make if it doesn't exist) dev set
+            if X_dev is None or Y_dev is None:
+                self.X_dev = self.X[:, -10000:]
+                self.Y_dev = self.Y[:, -10000:]
+                self.X = self.X[:, :-10000]
+                self.Y = self.Y[:, :-10000]
+            else:
+                self.X_dev = X_dev
+                self.Y_dev = Y_dev
+            self.Y_dev = one_hot_encoding(self.Y_dev, self.K)
+            self.m_dev = self.X_dev.shape[1]
 
-        # shuffle data
-        self.X, self.Y = self.shuffle(self.X, self.Y)
-        # Add (make if it doesn't exist) dev set
-        if X_dev is None or Y_dev is None:
-            self.X_dev = self.X[:, -10000:]
-            self.Y_dev = self.Y[:, -10000:]
-            self.X = self.X[:, :-10000]
-            self.Y = self.Y[:, :-10000]
-        else:
-            self.X_dev = X_dev
-            self.Y_dev = Y_dev
-        self.Y_dev = one_hot_encoding(self.Y_dev, self.K)
-        self.m_dev = self.X_dev.shape[1]
+            m = self.X.shape[1]
 
-        m = self.X.shape[1]
-
-        self.m_train = m
+            self.m_train = m
 
 
-        self.batches_num = self.m_train  // self.minibatch_size
-        last_mini_batch_idx = -(self.m_train % self.minibatch_size)
-        if last_mini_batch_idx != 0:
-            self.Xbatches = np.array_split(self.X[:,:last_mini_batch_idx], self.batches_num, axis=1)
-            self.Ybatches = np.array_split(self.Y[:,:last_mini_batch_idx], self.batches_num, axis=1)
-            self.Xbatches.append(self.X[:,last_mini_batch_idx:])
-            self.Ybatches.append(self.Y[:,last_mini_batch_idx:])
-            self.batches_num +=1
-        else:
-            self.Xbatches = np.array_split(self.X, self.batches_num, axis=1)
-            self.Ybatches = np.array_split(self.Y, self.batches_num, axis=1)
+            self.batches_num = self.m_train  // self.minibatch_size
+            last_mini_batch_idx = -(self.m_train % self.minibatch_size)
+            if last_mini_batch_idx != 0:
+                self.Xbatches = np.array_split(self.X[:,:last_mini_batch_idx], self.batches_num, axis=1)
+                self.Ybatches = np.array_split(self.Y[:,:last_mini_batch_idx], self.batches_num, axis=1)
+                self.Xbatches.append(self.X[:,last_mini_batch_idx:])
+                self.Ybatches.append(self.Y[:,last_mini_batch_idx:])
+                self.batches_num +=1
+            else:
+                self.Xbatches = np.array_split(self.X, self.batches_num, axis=1)
+                self.Ybatches = np.array_split(self.Y, self.batches_num, axis=1)
         
-        self.batchiterator = Batch_iterator(self.Xbatches, self.Ybatches)
+            self.batchiterator = Batch_iterator(self.Xbatches, self.Ybatches)
 
 
     def shuffle(self, X, Y):
