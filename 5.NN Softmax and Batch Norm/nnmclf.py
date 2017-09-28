@@ -72,6 +72,13 @@ def desoftmax(dA):
     pass
 
 
+def err_check(a, b): # to check gradient numerically
+    af = a.ravel()
+    bf = b.ravel()
+    errors = np.abs(af - bf) / np.maximum(np.abs(af), np.abs(bf))
+    return np.mean(errors)
+
+
 class Batch_iterator:
     def __init__(self, Xbatches, Ybatches):
         assert len(Xbatches) == len(Ybatches), 'X, Y list of batches must have the same length' 
@@ -108,7 +115,8 @@ class Multiclass_NN(object):
                  X_dev=None, Y_dev=None,
                  layers_list=[3072, 256, 128, 10],
                  keep_prob=[1.0,1.0,1.0,1.0],
-                 optimizer='momentum', minibatch_size = 16 ):
+                 optimizer='momentum', minibatch_size = 16,
+                 preinitialized=False):
         assert isinstance(keep_prob, list), 'keep_probe is a list of probabilities of keeping neurons during dropout in each layer'
         assert len(keep_prob) == len(layers_list), 'keep_prob should have the same length as layers_list'
         assert layers_list[0] == X.shape[0], 'Number of inputs (A0) in layers_list should be equal to number of rows in X'
@@ -150,6 +158,9 @@ class Multiclass_NN(object):
         self.dBeta  = [None]*self.L
         self.dGamma = [None]*self.L
         self.dW     = [None]*self.L
+        self.ndW     = [None]*self.L
+        self.ndBeta  = [None]*self.L
+        self.ndGamma = [None]*self.L
 
 
         self.VdW, self.VdGamma, self.VdBeta = self.init_optimizer(self.W_dims, 
@@ -158,43 +169,84 @@ class Multiclass_NN(object):
 
         self.Xraw = X
         self.Yraw = Y
-
-        self.X, self.X_mean, self.X_std = self.normalize(self.Xraw, gen_stats=True)
-        self.Y = one_hot_encoding(self.Yraw, self.K)
-        self.minibatch_size = minibatch_size
-
-        # shuffle data
-        self.X, self.Y = self.shuffle(self.X, self.Y)
-        # Add (make if it doesn't exist) dev set
-        if X_dev is None or Y_dev is None:
-            self.X_dev = self.X[:, -10000:]
-            self.Y_dev = self.Y[:, -10000:]
-            self.X = self.X[:, :-10000]
-            self.Y = self.Y[:, :-10000]
-        else:
-            self.X_dev = X_dev
-            self.Y_dev = Y_dev
-        self.Y_dev = one_hot_encoding(self.Y_dev, self.K)
-        self.m_dev = self.X_dev.shape[1]
-
-        m = self.X.shape[1]
-
-        self.m_train = m
-
-
-        self.batches_num = self.m_train  // self.minibatch_size
-        last_mini_batch_idx = -(self.m_train % self.minibatch_size)
-        if last_mini_batch_idx != 0:
-            self.Xbatches = np.array_split(self.X[:,:last_mini_batch_idx], self.batches_num, axis=1)
-            self.Ybatches = np.array_split(self.Y[:,:last_mini_batch_idx], self.batches_num, axis=1)
-            self.Xbatches.append(self.X[:,last_mini_batch_idx:])
-            self.Ybatches.append(self.Y[:,last_mini_batch_idx:])
-            self.batches_num +=1
-        else:
-            self.Xbatches = np.array_split(self.X, self.batches_num, axis=1)
-            self.Ybatches = np.array_split(self.Y, self.batches_num, axis=1)
         
-        self.batchiterator = Batch_iterator(self.Xbatches, self.Ybatches)
+        #added
+        if not preinitialized:
+        #/added
+            self.X, self.X_mean, self.X_std = self.normalize(self.Xraw, gen_stats=True)
+            self.Y = one_hot_encoding(self.Yraw, self.K)
+            self.minibatch_size = minibatch_size
+
+            # shuffle data
+            self.X, self.Y = self.shuffle(self.X, self.Y)
+            # Add (make if it doesn't exist) dev set
+            if X_dev is None or Y_dev is None:
+                self.X_dev = self.X[:, -10000:]
+                self.Y_dev = self.Y[:, -10000:]
+                self.X = self.X[:, :-10000]
+                self.Y = self.Y[:, :-10000]
+            else:
+                self.X_dev = X_dev
+                self.Y_dev = Y_dev
+            self.Y_dev = one_hot_encoding(self.Y_dev, self.K)
+            self.m_dev = self.X_dev.shape[1]
+
+            m = self.X.shape[1]
+
+            self.m_train = m
+
+
+            self.batches_num = self.m_train  // self.minibatch_size
+            last_mini_batch_idx = -(self.m_train % self.minibatch_size)
+            if last_mini_batch_idx != 0:
+                self.Xbatches = np.array_split(self.X[:,:last_mini_batch_idx], self.batches_num, axis=1)
+                self.Ybatches = np.array_split(self.Y[:,:last_mini_batch_idx], self.batches_num, axis=1)
+                self.Xbatches.append(self.X[:,last_mini_batch_idx:])
+                self.Ybatches.append(self.Y[:,last_mini_batch_idx:])
+                self.batches_num +=1
+            else:
+                self.Xbatches = np.array_split(self.X, self.batches_num, axis=1)
+                self.Ybatches = np.array_split(self.Y, self.batches_num, axis=1)
+            
+            self.batchiterator = Batch_iterator(self.Xbatches, self.Ybatches)
+
+
+            # def pack_weights(self, W, Gamma, Beta):
+                # return theta
+            # def unpack_weights(self, theta):
+                # return W, Gamma, Beta
+
+        # theta = self.pack_weights(self.W, self.Gamma, self.Beta)
+        # nW, nGamma, nBeta = self.unpack_weights(theta)
+        # for nw, w in zip(nW, self.W):
+        #     if nw is None and w is None:
+        #         continue
+        #     if not np.array_equal(nw, w):
+        #         print('Packing weight test failed')
+        #         exit()
+        #     else:
+        #         print(f'Packing weights W check succeed')
+
+        # for ng, g in zip(nGamma, self.Gamma):
+        #     if ng is None and g is None:
+        #         continue
+        #     if not np.array_equal(ng, g):
+        #         print('Packing weight test failed')
+        #         exit()
+        #     else:
+        #         print(f'Packing weights Gamma check succeed')
+
+        # for nb, b in zip(nBeta, self.Beta):
+        #     if nb is None and b is None:
+        #         continue
+        #     if not np.array_equal(nb, b):
+        #         print('Packing weight test failed')
+        #         exit()
+        #     else:
+        #         print(f'Packing weights Beta check succeed')
+        # exit()
+
+
 
 
     def shuffle(self, X, Y):
@@ -247,7 +299,7 @@ class Multiclass_NN(object):
     def new_dropout_mask(self, KP):
         for l in range(1,self.L):
             mask = (np.random.rand(self.layers_list[l],1) < KP[l]).astype(np.int32)
-            self.D[l] = mask / KP[l]
+            self.D[l] = mask / KP[l] 
 
 
     def forward(self, X, W = None, Beta = None, Gamma = None, dropout=False, testtime=False):
@@ -304,7 +356,7 @@ class Multiclass_NN(object):
 
     def predict(self, X, W = None, B = None):
         X, _, _ = self.normalize(X)
-        self.forward(X)
+        self.forward(X, testtime=True)
         return self.A[-1]
 
 
@@ -313,7 +365,7 @@ class Multiclass_NN(object):
         Y = Y.astype(np.bool)
         Yhj = AL[Y]
         Losses = -np.log(Yhj[np.nonzero(Yhj)])
-        return np.mean(Losses)
+        return np.sum(Losses) / self.minibatch_size
 
 
     def backprop(self, X, Y):
@@ -361,21 +413,37 @@ class Multiclass_NN(object):
         pass
 
 
-    def momentum_train(self, iterations=1000, yld=10):
+    def momentum_train(self, iterations=1000, yld=10, numcheck=False):
         b  = self.momentum_beta    
         nb = 1 - b
         a  = self.learning_rate
         L  = self.L
         dW     = self.dW
         dBeta  = self.dBeta
-        dGamma = self.dGamma
+        dGamma = self.dGamma        
         VdW     = self.VdW
         VdGamma = self.VdGamma
         VdBeta  = self.VdBeta
+        num_check_err = 12345
         start_train = now()
+
         for X, Y, i, epoch, idx in self.batchiterator(iterations):
             #momentum            
             self.backprop(X, Y)
+
+            if numcheck:
+                self.num_grad(X,Y)
+
+                ndW     = self.ndW
+                ndBeta  = self.ndBeta
+                ndGamma = self.ndGamma
+                
+                dtheta = self.pack_weights(dW, dGamma, dBeta)
+                ndtheta = self.pack_weights(ndW, ndGamma, ndBeta)
+
+                num_check_err = err_check(dtheta, ndtheta)
+
+
             for l in range(1, L):
                 self.VdW[l] = b*self.VdW[l] + nb*dW[l]
                 self.VdGamma[l] = b*self.VdGamma[l] + nb*dGamma[l]
@@ -392,6 +460,9 @@ class Multiclass_NN(object):
                 AL = self.predict(self.X_dev)                
                 dev_cost = self.cost(AL, self.Y_dev)
                 accuracy, precision, recall, f1 = self.statistics(AL, self.Y_dev)
+
+
+
                 info = {"iteration"     : i,
                         "epoch"         : epoch,
                         "batch_idx"     : idx,
@@ -402,13 +473,76 @@ class Multiclass_NN(object):
                         "dev_recall"    : recall,
                         "dev_f1"        : f1,
                         "report_time"   : now() - start_stats,
-                        "train_time"    : train_time}
+                        "train_time"    : train_time, 
+                        "num_check_err" : num_check_err}
                 start_train = now()
                 yield info
 
 
-    def numcheck(self, ):
-        pass
+    def pack_weights(self, W, Gamma, Beta):
+        WBlob = np.concatenate([Wl.ravel() for Wl in W[1:]])
+        GammaBlob = np.concatenate([Gammal.ravel() for Gammal in Gamma[1:]])
+        BetaBlob = np.concatenate([Betal.ravel() for Betal in Beta[1:]])
+        theta = np.concatenate((WBlob, GammaBlob, BetaBlob))
+        return theta
+
+
+    def unpack_weights(self, theta):
+        W     = [None]
+        Gamma = [None]
+        Beta  = [None]
+        start = 0
+        for dims in self.W_dims[1:]: # for nxm matrix
+            mx_size = dims[0] * dims[1]
+            end = start+mx_size
+            mx  = theta[start:end]
+            start = end
+            W.append(mx.reshape(*dims))
+
+        for dims in self.Z_dims[1:]: # for nx1 matrix
+            mx_size = dims
+            end = start+mx_size
+            mx  = theta[start:end]
+            start = end
+            Gamma.append(mx.reshape(dims,1))
+
+        for dims in self.Z_dims[1:]: # for nx1 matrix
+            mx_size = dims
+            end = start+mx_size
+            mx  = theta[start:end]
+            start = end
+            Beta.append(mx.reshape(dims,1))
+        return W, Gamma, Beta
+
+
+    def num_grad(self, X, Y):
+        A       = self.A 
+        L       = self.L
+        m       = self.minibatch_size
+        Beta    = self.Beta
+        Gamma   = self.Gamma
+        W       = self.W
+
+        epsilon = 1e-7
+        
+        theta   = self.pack_weights(W, Gamma, Beta)
+        dtheta  = np.zeros(theta.shape)
+        
+
+        for i in range(theta.size):
+            theta[i] += epsilon
+            W, Gamma, Beta = self.unpack_weights(theta)
+            self.forward(X, W = W, Gamma = Gamma, Beta = Beta, dropout=False, testtime=False)
+            rightloss = self.cost(A[-1], Y)
+
+            theta[i] -= 2*epsilon
+            W, Gamma, Beta = self.unpack_weights(theta)
+            self.forward(X, W = W, Gamma = Gamma, Beta = Beta, dropout=False, testtime=False)
+            leftloss = self.cost(A[-1], Y)
+
+            dtheta[i]  = (rightloss - leftloss) / (2*epsilon)
+
+        self.ndW, self.ndGamma, self.ndBeta = self.unpack_weights(dtheta)
 
 
     def statistics(self, AL, Y):

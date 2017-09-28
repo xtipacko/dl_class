@@ -46,12 +46,14 @@ def cv(X, Y, Xtest, Ytest):
 
 
 
-def train(X, Y, Xtest, Ytest):
+def train(X, Y, Xtest, Ytest, store_result=True, use_stored_result=True, numcheck=False):
     learning_rate = 2
-    keep_prob =   [ 1.0,  0.80,  0.80,  0.80,  0.80, 0.80, 0.80, 0.80,    1] 
-    layers_list = [3072,  1024,  1024,   512,   512,  512,  128,  128,   10]
+    # keep_prob =   [ 1.0,  0.80,  0.80,  0.80,  0.80, 0.80, 0.80, 0.80,    1] 
+    # layers_list = [3072,  1024,  1024,   512,   512,  512,  128,  128,   10]
     # keep_prob   = [ 1.0,  0.5,    0.5,    0.5, 1.0] 
     # layers_list = [3072,  3072,  3072,   3072,  10]
+    keep_prob   = [ 1.0,   1.0,   1.0,    1.0, 1.0] 
+    layers_list = [3072,  16,    16,     16,  10]
     fname = f'weights_a={learning_rate}, Li={str(layers_list)}, KP={str(keep_prob)}_.pickle'
     print('model created')
     model = Multiclass_NN(X,Y, 
@@ -59,10 +61,12 @@ def train(X, Y, Xtest, Ytest):
                           learning_rate=learning_rate, 
                           keep_prob=keep_prob, 
                           layers_list=layers_list, 
-                          minibatch_size=256)
+                          minibatch_size=4)
 
     template = '[{iteration:06}, epoch:{epoch}, {train_time:.3f}/{report_time:.3f} ms] Train cost: {train_cost:.7f};   Dev cost: {dev_cost:.7f}, accuracy: {dev_accuracy:.4f}'
-    if os.path.isfile(fname):
+    if numcheck:
+        template += ', {num_check_err:.12f}'
+    if os.path.isfile(fname) and use_stored_result:
         with open(fname, 'rb') as f:
             W, Beta, Gamma = pickle.load(f)
         model.W = W
@@ -71,14 +75,15 @@ def train(X, Y, Xtest, Ytest):
         print('weights loaded')
     print('backprop started')
     try:
-        for info in model.momentum_train(iterations=100000, yld=100):        
+        for info in model.momentum_train(iterations=10, yld=1, numcheck=True):        
             print(template.format(**info))
             # if np.isnan(info["train_cost"]) and  info["iteration"] >= 80:
             #     break
     finally:    
-        weights = model.W, model.Beta, model.Gamma        
-        with open(fname, 'wb+') as f:
-            pickle.dump(weights, f)
+        if store_result:
+            weights = model.W, model.Beta, model.Gamma        
+            with open(fname, 'wb+') as f:
+                pickle.dump(weights, f)
     
 
 
@@ -92,7 +97,7 @@ def main():
     Xtest, Ytest = convert_for_nn(test_batches)
 
     #cv(X, Y, Xtest, Ytest)
-    train(X, Y, Xtest, Ytest)
+    train(X[:, :10000], Y[:, :10000], Xtest[:, :1000], Ytest[:, :1000], store_result=False, use_stored_result=False, numcheck=True)
 
 
 if __name__ == '__main__':
